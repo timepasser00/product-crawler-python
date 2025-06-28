@@ -1,0 +1,6 @@
+product_urls.csv
+crawler.log
+node_modules/
+__pycache__/
+.crawler.py.swp
+venv/
