@@ -3,7 +3,7 @@ from crawler import crawl_multiple_seeds
 
 if __name__ == "__main__":
     seed_urls = [
-        "https://nykaafashion.com"
+        "https://www.nykaafashion.com/"
     ]
 
     output_csv = "product_urls.csv"

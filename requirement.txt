@@ -1,0 +1,7 @@
+aiohttp==3.8.4          # For asynchronous HTTP requests
+aiofiles==23.1.0        # For asynchronous file handling
+beautifulsoup4==4.12.2  # For HTML parsing
+lxml==4.9.3             # For fast HTML and XML parsing
+selenium==4.10.0        # For browser-based fetching
+requests==2.31.0        # For fallback HTTP requests
+urllib3==2.0.5          # For advanced URL handling

@@ -1,21 +1,20 @@
 import asyncio
-import json
-import subprocess
+from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
 import httpx
 import random
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-from typing import Optional
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.by import By
 
 USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/114.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/112.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Firefox/113.0",
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
 ]
-
-# USER_AGENTS = [
-#     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/114.0.0.0 Safari/537.36",
-#     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/112.0.0.0 Safari/537.36",
-#     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Firefox/113.0",
-#     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
-# ]
 
 
 TIMEOUT = httpx.Timeout(None, connect=5.0)
@@ -27,7 +26,7 @@ HEADERS_BASE = {
 }
 
 @retry(
-    stop=stop_after_attempt(3),
+    stop=stop_after_attempt(2),
     wait=wait_exponential(multiplier=1, min=1, max=10),
     retry=retry_if_exception_type((httpx.RequestError, httpx.TimeoutException))
 )
@@ -47,11 +46,11 @@ async def fetch_static(url: str) -> dict:
                     "html": None,
                     "error": "Non-HTML content"
                 }
-
+            soup = BeautifulSoup(response.text, "html.parser")
             return {
                 "url": str(response.url),
                 "status": response.status_code,
-                "html": response.text,
+                "html": soup.prettify() if soup else None,
                 "error": None
             }
 
@@ -63,54 +62,38 @@ async def fetch_static(url: str) -> dict:
                 "error": f"Request error: {str(e)}"
             }
 
-async def fetch_html_with_node_async(url: str) -> dict:
+def _fetch_with_selenium_sync(url: str) -> dict:
+    options = Options()
+    options.headless = True
+    options.add_argument('--headless')
+    options.add_argument('--no-sandbox')
+    options.add_argument('--disable-dev-shm-usage')
+    options.add_argument('--user-agent=' + random.choice(USER_AGENTS))
+
     try:
-        print(f"creating node process")
-        process = await asyncio.create_subprocess_exec(
-            'node', 'fetch_html.js', url,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
+        driver = webdriver.Chrome(options=options)
+        driver.set_page_load_timeout(20)
+        driver.get(url)
+
+        WebDriverWait(driver, 15).until(
+            EC.presence_of_element_located((By.TAG_NAME, "body"))
         )
-        stdout, stderr = await process.communicate()
 
-        if process.returncode == 0:
-            return json.loads(stdout.decode())
-        else:
-            return {
-                "url": url,
-                "status": 0,
-                "html": None,
-                "error": stderr.decode().strip()
-            }
-
+        html = driver.page_source
+        soup = BeautifulSoup(html, "lxml")
+        driver.quit()
+        return {"url": url, "html": soup.prettify(), "status": 200}
     except Exception as e:
-        return {
-            "url": url,
-            "status": 0,
-            "html": None,
-            "error": str(e)
-        }
+        return {"url": url, "html": "", "status": None}
+    
+async def fetch_html_with_selenium(url: str) -> dict:
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _fetch_with_selenium_sync, url)
 
-def fetch_html_with_node(url: str) -> str:
-    try:
-        result = subprocess.run(
-            ['node', 'fetch_html.js', url],
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-        if result.returncode == 0:
-            return result.stdout
-        else:
-            print(f"[!] Node script error: {result.stderr}")
-    except Exception as e:
-        print(f"[!] Failed to fetch HTML: {e}")
-    return ""
 
 async def smart_fetch_html(url: str):
     result = await fetch_static(url)
     if result["status"] == 200 and result["html"].strip():
         return result
-    print(f"Trying to fetch with Node for {url} due to static fetch failure.")
-    result = await fetch_html_with_node_async(url)
+    result = await fetch_html_with_selenium(url)
     return result

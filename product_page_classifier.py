@@ -1,16 +1,19 @@
-import re
-import math
+import math, re
 from bs4 import BeautifulSoup
-from urllib.parse import urlparse
-from config import DEFAULT_FEATURE_WEIGHTS
+from urllib.parse import urlparse, parse_qs
+from product_url_analyser import is_product_url
+from feature_weights import DEFAULT_FEATURE_WEIGHTS
 
 class ProductPageClassifier:
+    """
+    Classifies web pages as product pages or not based on various heuristics and URL patterns.
+    """
+    
     @staticmethod
     def sigmoid(x):
         return 1 / (1 + math.exp(-x))
 
-    @staticmethod
-    def analyze(soup: BeautifulSoup, url: str = "", weights: dict = None, logger=print):
+    def analyze(self, soup: BeautifulSoup, url: str = "", weights: dict = None, logger=print):
         weights = weights or DEFAULT_FEATURE_WEIGHTS
         score = 0.0
         explanation = []
@@ -19,10 +22,9 @@ class ProductPageClassifier:
             script.decompose()
 
         def log(msg):
-            msg = msg + "\n"
-            explanation.append(msg)
+            explanation.append(msg + "\n")
 
-        # Positive indicators
+        # --- Price Detection ---
         price_texts = soup.find_all(string=re.compile(r'(₹|\$|€)\s?\d{2,}'))
         if price_texts:
             score += weights["price_present"]
@@ -31,60 +33,49 @@ class ProductPageClassifier:
             score += weights["no_price_at_all"]
             log(f"{weights['no_price_at_all']}: No price detected")
 
-        img_tags = soup.find_all("img")
-        main_imgs = [img for img in img_tags if any(
-            kw in (img.get("alt", "") + img.get("src", "")).lower()
-            for kw in ["product", "zoom", "main"]
-        )]
-        if len(main_imgs) >= 1:
-            score += weights["single_main_image"]
-            log(f"+{weights['single_main_image']}: Product-like image detected")
-        if len(img_tags) > 10:
-            score += weights["too_many_images"]
-            log(f"{weights['too_many_images']}: Too many images ({len(img_tags)})")
+        # --- CTA Detection ---
+        cta_texts = soup.find_all(string=re.compile(r"(add to cart|buy now|select size)", re.IGNORECASE))
+        if len(cta_texts) != 1:
+            score -= weights["multiple_cta"]
+            log(f"-5.0: Buy text is occurence  : ({len(cta_texts)})")
+        else:
+            score += weights['exact_one_cta'];
+            log(f"+{weights['exact_one_cta']}: Exactly one 'Add to Cart' or 'Buy Now' CTA found: {cta_texts[0].strip()}")
 
-        if soup.find(string=re.compile(r"add to cart|buy now|select size", re.IGNORECASE)):
-            score += weights["add_to_cart_cta"]
-            log(f"+{weights['add_to_cart_cta']}: CTA text found")
-
-        h1 = soup.find("h1")
-        if h1 and len(h1.get_text(strip=True)) >= 10:
-            score += weights["product_title"]
-            log(f"+{weights['product_title']}: H1 title found '{h1.get_text(strip=True)}'")
-
-        if soup.find(string=re.compile(r"product details|specifications", re.IGNORECASE)):
+        if soup.find(string=re.compile(r"product details|specifications| select size", re.IGNORECASE)):
             score += weights["spec_section"]
             log(f"+{weights['spec_section']}: Product details section found")
 
-        if soup.find(attrs={"itemtype": re.compile(r"Product", re.IGNORECASE)}):
-            score += weights["semantic_schema"]
-            log(f"+{weights['semantic_schema']}: Schema.org Product type found")
+        # if soup.find(attrs={"itemtype": re.compile(r"Product", re.IGNORECASE)}):
+        #     score += weights["semantic_schema"]
+        #     log(f"+{weights['semantic_schema']}: Schema.org Product detected")
 
         if soup.find(string=re.compile(r"similar products|you may also like|recommended", re.IGNORECASE)):
             score += weights["related_products"]
-            log(f"+{weights['related_products']}: Related products section found")
+            log(f"+{weights['related_products']}: Related/recommended section found")
 
-        # Negative indicators
-        if len(price_texts) > 5:
-            score += weights["too_many_prices"]
-            log(f"{weights['too_many_prices']}: Too many price tags ({len(price_texts)})")
-
-        if len(soup.find_all("a")) > 10:
-            score += weights["many_links"]
-            log(f"{weights['many_links']}: Too many links on page")
-
-        if url:
-            parsed = urlparse(url)
-            if parsed.path.endswith(('/category', '/search', '/blog')):
-                score += weights["bad_url_path"]
-                log(f"{weights['bad_url_path']}: URL path suggests non-product page")
+        num_links = len(soup.find_all("a"))
+        # if num_links > 20:
+        #     score += weights["many_links"]
+        #     log(f"{weights['many_links']}: Many links ({num_links})")
 
         if not soup.find("input") and not soup.find("form"):
             score += weights["no_inputs_or_forms"]
-            log(f"{weights['no_inputs_or_forms']}: No form or input fields found")
+            log(f"{weights['no_inputs_or_forms']}: No inputs/forms found")
+
+        # --- URL Analysis ---
+        is_prod_url, url_score, url_explanation = is_product_url(url)
+        score += url_score
+        explanation.extend(url_explanation)
 
         confidence = ProductPageClassifier.sigmoid(score)
         is_product_page = confidence >= 0.8
+
+        # Short-circuit if confidence is low
+        if not len(cta_texts) == 1 and not price_texts:
+            confidence = 0.0
+            is_product_page = False
+            log("Short-circuited: Lacking all core indicators (CTA, price, image)")
 
         logger(f"""
         Url: {url}
@@ -92,7 +83,7 @@ class ProductPageClassifier:
         Confidence: {confidence:.4f}
         Is product page: {is_product_page}
         """)
-        logger("Explanation:\n" + ",".join(explanation))
+        logger("Explanation:\n" + "".join(explanation))
 
         return {
             "is_product_page": is_product_page,
@@ -100,4 +91,3 @@ class ProductPageClassifier:
             "score": round(score, 2),
             "explanation": explanation
         }
-    
