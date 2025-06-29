@@ -13,21 +13,41 @@ Powerful Crawler is an asynchronous web crawler designed to fetch and parse HTML
 
 ## Architecture
 Below is a visual representation of the components and their interactions:
+``` mermaid
+flowchart TD;
 
-```mermaid
-    Start[Start Crawler] --> Seed[Seed URLs]
-    Seed -->|Add to Frontier| FrontierQueue[Frontier Queue]
-    FrontierQueue -->|URL| FetcherWorker[Fetcher Worker]
-    FetcherWorker -->|HTML| HTMLQueue[HTML Queue]
-    FetcherWorker -->|Retry with Selenium| SeleniumFetcher[Selenium Fetcher]
-    HTMLQueue -->|HTML| ParserWorker[Parser Worker]
-    ParserWorker -->|Analyze| ProductPageClassifier[Product Page Classifier]
-    ParserWorker -->|Dead End Detection| ProductUrlAnalyzer[Product URL Analyzer]
-    ProductPageClassifier -->|Is Product Page?| Output[Output Product URLs]
-    ProductUrlAnalyzer -->|Dead End URLs| FrontierQueue
-    ParserWorker -->|Child URLs| FrontierQueue
-    End[End Crawler] <-- Output
+    A[Start] --> B[Traverse each Seed URL one by one]
+    B --> C[Initialize Frontier with Seed URL <br> Create Fetcher Task <br> Create Parser Task]
+
+    C --> D[Fetcher Worker]
+    D --> E[Async Fetcher tries Async Client]
+    E -->|Success| F[HTML Content → HTML Queue]
+    E -->|Failure| G[Uses Selenium]
+    G --> H[HTML Content → HTML Queue]
+
+    F & H --> I[Parser Worker waits on HTML Queue]
+
+    I --> J{HTML Content available?}
+    J -->|Yes| K[Parse HTML:<br>- Extract Child URLs<br>- Detect Product URL]
+
+    K --> L[Use Product Page Analyzer: <br>- Check HTML Features + URL Patterns]
+    K --> M[Use Product URL Analyzer: <br>Detect Dead-end URLs]
+
+    L --> N[If Product Page → Write to Output File]
+    M --> O[If Valid & Not Visited → Add Child URLs to Frontier]
+
+    J -->|No more HTML| P[Insert None in Queue\n→ Signal Parser to Stop]
+    D --> Q[All URLs Fetched → Fetcher Worker Stops]
+
+    P --> R[Parser Worker Stops]
+    R --> S[Stop]
+    Q --> S
+
+    style A fill:green,stroke:#333,stroke-width:2px
+    style S fill:red,stroke:#333,stroke-width:2px
+
 ```
+
 
 ### Component Details
 1. **Frontier Queue**: Stores URLs to be fetched. Acts as the starting point for the crawler.
