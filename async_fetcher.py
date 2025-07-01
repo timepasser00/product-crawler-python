@@ -2,9 +2,7 @@ import asyncio
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
-import httpx
 import random
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
@@ -15,52 +13,6 @@ USER_AGENTS = [
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Firefox/113.0",
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
 ]
-
-
-TIMEOUT = httpx.Timeout(None, connect=5.0)
-
-HEADERS_BASE = {
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9",
-    "Accept-Language": "en-US,en;q=0.5",
-    "Connection": "keep-alive"
-}
-
-@retry(
-    stop=stop_after_attempt(2),
-    wait=wait_exponential(multiplier=1, min=1, max=10),
-    retry=retry_if_exception_type((httpx.RequestError, httpx.TimeoutException))
-)
-async def fetch_static(url: str) -> dict:
-    headers = HEADERS_BASE.copy()
-    headers["User-Agent"] = random.choice(USER_AGENTS)
-
-    async with httpx.AsyncClient(http2=True, timeout=TIMEOUT, follow_redirects=True) as client:
-        try:
-            response = await client.get(url, headers=headers)
-
-            content_type = response.headers.get("content-type", "")
-            if "text/html" not in content_type:
-                return {
-                    "url": str(response.url),
-                    "status": response.status_code,
-                    "html": None,
-                    "error": "Non-HTML content"
-                }
-            soup = BeautifulSoup(response.text, "html.parser")
-            return {
-                "url": str(response.url),
-                "status": response.status_code,
-                "html": soup.prettify() if soup else None,
-                "error": None
-            }
-
-        except httpx.RequestError as e:
-            return {
-                "url": url,
-                "status": None,
-                "html": None,
-                "error": f"Request error: {str(e)}"
-            }
 
 def _fetch_with_selenium_sync(url: str) -> dict:
     options = Options()
@@ -92,8 +44,5 @@ async def fetch_html_with_selenium(url: str) -> dict:
 
 
 async def smart_fetch_html(url: str):
-    result = await fetch_static(url)
-    if result["status"] == 200 and result["html"].strip():
-        return result
     result = await fetch_html_with_selenium(url)
     return result

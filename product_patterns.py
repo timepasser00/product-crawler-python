@@ -33,7 +33,7 @@ DEAD_END_PATTERNS = {
     'non_product_actions': [
     r'/add-to-cart', r'/buy-now', r'/quick-view', r'/share',
     r'/email-friend', r'/track-order', r'/order-status',
-    r'/download', r'/subscribe', r'/unsubscribe'
+    r'/download', r'/subscribe', r'/unsubscribe', r'/reviews',
     ]
 }
 

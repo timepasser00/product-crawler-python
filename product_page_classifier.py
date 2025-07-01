@@ -34,7 +34,7 @@ class ProductPageClassifier:
             log(f"{weights['no_price_at_all']}: No price detected")
 
         # --- CTA Detection ---
-        cta_texts = soup.find_all(string=re.compile(r"(add to cart|buy now|select size)", re.IGNORECASE))
+        cta_texts = soup.find_all(string=re.compile(r"(add to cart|buy now|select size|select color)", re.IGNORECASE))
         if len(cta_texts) != 1:
             score -= weights["multiple_cta"]
             log(f"-5.0: Buy text is occurence  : ({len(cta_texts)})")
@@ -42,7 +42,7 @@ class ProductPageClassifier:
             score += weights['exact_one_cta'];
             log(f"+{weights['exact_one_cta']}: Exactly one 'Add to Cart' or 'Buy Now' CTA found: {cta_texts[0].strip()}")
 
-        if soup.find(string=re.compile(r"product details|specifications| select size", re.IGNORECASE)):
+        if soup.find(string=re.compile(r"product details|specifications| select size| add to wishlist| know your product", re.IGNORECASE)):
             score += weights["spec_section"]
             log(f"+{weights['spec_section']}: Product details section found")
 
@@ -65,7 +65,9 @@ class ProductPageClassifier:
 
         # --- URL Analysis ---
         is_prod_url, url_score, url_explanation = is_product_url(url)
-        score += url_score
+        if is_prod_url:
+            score += 2.0
+        # score += url_score
         explanation.extend(url_explanation)
 
         confidence = ProductPageClassifier.sigmoid(score)
