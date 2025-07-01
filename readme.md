@@ -13,41 +13,70 @@ Powerful Crawler is an asynchronous web crawler designed to fetch and parse HTML
 
 ## Architecture
 Below is a visual representation of the components and their interactions:
+
 ``` mermaid
-flowchart TD;
 
-    A[Start] --> B[Traverse each Seed URL one by one]
-    B --> C[Initialize Frontier with Seed URL <br> Create Fetcher Task <br> Create Parser Task]
+flowchart TD
+    A[Main: __main__] --> B[Initialize AsyncCrawler]
+    B --> C[Seed URLs list]
+    C --> D[Call crawl_multiple_seeds]
+    D --> E[crawl_and_collect for each seed]
 
-    C --> D[Fetcher Worker]
-    D --> E[Async Fetcher tries Async Client]
-    E -->|Success| F[HTML Content → HTML Queue]
-    E -->|Failure| G[Uses Selenium]
-    G --> H[HTML Content → HTML Queue]
+    subgraph Crawl_Workflow
+        E --> F1[Init logger, tracker, lock]
+        F1 --> F2[Create URLFrontier]
+        F2 --> F3[Add seed_url to frontier]
+        F3 --> F4[Start parser worker]
+        F3 --> F5[Start fetcher workers - uses semaphore]
 
-    F & H --> I[Parser Worker waits on HTML Queue]
+        subgraph Parallel_Fetchers
+            F5 --> FW[Fetcher worker]
+            FW --> F6[smart_fetch_html]
+            F6 --> F7[Fetch using Selenium - headless Chrome]
+            F7 --> F8[Return HTML result]
+            F8 --> F9[Put url, html, depth into HTML queue]
+            F9 --> F10[Tracker add]
+        end
 
-    I --> J{HTML Content available?}
-    J -->|Yes| K[Parse HTML:<br>- Extract Child URLs<br>- Detect Product URL]
+        F4 --> P1[Wait for HTML from queue]
+        P1 --> P2[Call HTMLParser parse_html]
 
-    K --> L[Use Product Page Analyzer: <br>- Check HTML Features + URL Patterns]
-    K --> M[Use Product URL Analyzer: <br>Detect Dead-end URLs]
+        subgraph HTMLParser
+            P2 --> HP1[Parse HTML with BeautifulSoup]
+            HP1 --> HP2[Run ProductPageClassifier analyze]
+            HP2 --> HP3{Is product page}
+            HP3 -->|Yes| HP4[Add to product_urls]
+            HP3 -->|No| HP5[Skip]
 
-    L --> N[If Product Page → Write to Output File]
-    M --> O[If Valid & Not Visited → Add Child URLs to Frontier]
+            HP1 --> HP6[Extract anchor tags]
+            HP6 --> HP7[Join and normalize hrefs]
+            HP7 --> HP8[Filter by domain]
+            HP8 --> HP9[Remove dead ends - is_dead_end_url]
+            HP9 --> HP10[Add valid child_urls]
+        end
 
-    J -->|No more HTML| P[Insert None in Queue\n→ Signal Parser to Stop]
-    D --> Q[All URLs Fetched → Fetcher Worker Stops]
+        HP10 --> P3[Add child_urls to frontier]
+        HP4 --> P4[Write product_urls to CSV]
+        P4 --> P5[Tracker done]
+        F10 --> P5
+        P5 --> F11[Wait for all tasks to finish]
+    end
 
-    P --> R[Parser Worker Stops]
-    R --> S[Stop]
-    Q --> S
+    F11 --> G[Cleanup workers]
+    G --> H[Return collected product URLs]
 
-    style A fill:green,stroke:#333,stroke-width:2px
-    style S fill:red,stroke:#333,stroke-width:2px
+    subgraph URLFrontier
+        F2 --> UF1[Use priority queue for URLs]
+        UF1 --> UF2[Score each URL with score_url]
+        UF2 --> UF3{URL type}
+        UF3 --> UF4[High confidence product - score 1]
+        UF3 --> UF5[Medium confidence - score 3]
+        UF3 --> UF6[Dead end - score 100]
+        UF3 --> UF7[Default - score 10]
+    end
+
 
 ```
-
 
 ### Component Details
 1. **Frontier Queue**: Stores URLs to be fetched. Acts as the starting point for the crawler.
